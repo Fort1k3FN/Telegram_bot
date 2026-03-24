@@ -315,6 +315,8 @@ class Program
             options.BinaryLocation = "/usr/bin/google-chrome";
         }
 
+        Console.WriteLine("CREATING DRIVER...");
+
         IWebDriver driver;
 
         if (OperatingSystem.IsLinux())
@@ -326,16 +328,15 @@ class Program
             driver = new ChromeDriver(options);
         }
 
-        // ВАЖЛИВО: тільки для Linux (Render)
-        if (OperatingSystem.IsLinux())
-        {
-            options.BinaryLocation = "/usr/bin/google-chrome";
-        }
-
         try
         {
+            Console.WriteLine("START DRIVER");
+
             driver.Navigate().GoToUrl(url);
-            await Task.Delay(800, ct);
+
+            Console.WriteLine("PAGE LOADED");
+
+            await Task.Delay(2000, ct);
 
             // Build linear list of body elements to map date headers to following tables (columns)
             var bodyElems = driver.FindElements(By.CssSelector("body *")).ToList();
