@@ -307,6 +307,8 @@ class Program
         options.AddArgument("--disable-dev-shm-usage");
         options.AddArgument("--disable-gpu");
         options.AddArgument("--window-size=1920,1080");
+        options.AddArgument("--remote-debugging-port=9222");
+        options.AddArgument("--disable-software-rasterizer");
 
         if (OperatingSystem.IsLinux())
         {
