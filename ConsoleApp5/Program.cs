@@ -14,7 +14,6 @@ class Program
 {
     static HashSet<long> Admins = new() { 828027108 };
     static Dictionary<string, string> Commands = new();
-
     static List<long> Users = new();
 
     static string adminsFile = "admins.txt";
@@ -42,7 +41,7 @@ class Program
 
         Console.WriteLine("BOT STARTED");
 
-        // 🔥 анти-сон + перевірка змін
+        // 🔥 перевірка змін
         _ = Task.Run(async () =>
         {
             while (true)
@@ -80,22 +79,22 @@ class Program
                 {
                     offset = upd.GetProperty("update_id").GetInt32() + 1;
 
-                    // CALLBACK
+                    // 🔘 CALLBACK (КНОПКИ)
                     if (upd.TryGetProperty("callback_query", out var cb))
                     {
-                        var chatId = cb.GetProperty("message").GetProperty("chat").GetProperty("id").GetInt64();
+                        var cbChatId = cb.GetProperty("message").GetProperty("chat").GetProperty("id").GetInt64();
                         var data = cb.GetProperty("data").GetString();
 
-                        if (!Admins.Contains(chatId)) continue;
+                        if (!Admins.Contains(cbChatId)) continue;
 
                         if (data == "add")
-                            await Send(http, chatId, "✏️ /add команда текст");
+                            await Send(http, cbChatId, "✏️ Використай: /add команда текст");
 
                         if (data == "del")
-                            await Send(http, chatId, "❌ /del команда");
+                            await Send(http, cbChatId, "❌ Використай: /del команда");
 
                         if (data == "send")
-                            await Send(http, chatId, "📢 /send текст");
+                            await Send(http, cbChatId, "📢 Використай: /send текст");
 
                         continue;
                     }
@@ -111,24 +110,24 @@ class Program
 
                     bool isAdmin = Admins.Contains(chatId);
 
-                    // ID
+                    // 🆔 ID
                     if (text == "/id")
                     {
                         await Send(http, chatId, $"🆔 Твій ID: {chatId}");
                         continue;
                     }
 
-                    // АДМІН ПАНЕЛЬ
+                    // 👑 АДМІН ПАНЕЛЬ
                     if (text == "/admin" && isAdmin)
                     {
-                        var kb = new
+                        var keyboard = new
                         {
                             inline_keyboard = new[]
                             {
                                 new[]
                                 {
-                                    new { text = "➕ Команда", callback_data = "add" },
-                                    new { text = "❌ Видалити", callback_data = "del" }
+                                    new { text = "➕ Додати команду", callback_data = "add" },
+                                    new { text = "❌ Видалити команду", callback_data = "del" }
                                 },
                                 new[]
                                 {
@@ -141,21 +140,21 @@ class Program
                         {
                             chat_id = chatId,
                             text = "⚙️ Адмін панель",
-                            reply_markup = kb
+                            reply_markup = keyboard
                         });
 
                         continue;
                     }
 
-                    // HELP
+                    // 📜 СПИСОК КОМАНД
                     if (text == "/ahelp" && isAdmin)
                     {
                         await Send(http, chatId,
 @"👑 Адмін команди:
 
-/admin - панель
-/add cmd текст
-/del cmd
+/admin
+/add команда текст
+/del команда
 /send текст
 /addadmin ID
 /deladmin ID
@@ -163,98 +162,125 @@ class Program
                         continue;
                     }
 
-                    // ADMIN ADD
+                    // ➕ ДОДАТИ АДМІНА
                     if (text.StartsWith("/addadmin") && isAdmin)
                     {
-                        var id = long.Parse(text.Split(' ')[1]);
-                        Admins.Add(id);
-                        SaveAdmins();
-                        await Send(http, chatId, "✅ Додано");
+                        var parts = text.Split(' ');
+                        if (parts.Length < 2) continue;
+
+                        if (long.TryParse(parts[1], out long id))
+                        {
+                            Admins.Add(id);
+                            SaveAdmins();
+                            await Send(http, chatId, "✅ Адмін доданий");
+                        }
                         continue;
                     }
 
+                    // ❌ ВИДАЛИТИ АДМІНА
                     if (text.StartsWith("/deladmin") && isAdmin)
                     {
-                        var id = long.Parse(text.Split(' ')[1]);
-                        Admins.Remove(id);
-                        SaveAdmins();
-                        await Send(http, chatId, "❌ Видалено");
+                        var parts = text.Split(' ');
+                        if (parts.Length < 2) continue;
+
+                        if (long.TryParse(parts[1], out long id))
+                        {
+                            Admins.Remove(id);
+                            SaveAdmins();
+                            await Send(http, chatId, "❌ Адмін видалений");
+                        }
                         continue;
                     }
 
-                    // COMMANDS SAVE
+                    // ➕ ДОДАТИ КОМАНДУ
                     if (text.StartsWith("/add") && isAdmin)
                     {
-                        var p = text.Split(' ', 3);
-                        Commands[p[1]] = p[2];
+                        var parts = text.Split(' ', 3);
+                        if (parts.Length < 3) continue;
+
+                        Commands[parts[1]] = parts[2];
                         SaveCommands();
-                        await Send(http, chatId, "✅ Додано");
+
+                        await Send(http, chatId, "✅ Команда додана");
                         continue;
                     }
 
+                    // ❌ ВИДАЛИТИ КОМАНДУ
                     if (text.StartsWith("/del") && isAdmin)
                     {
-                        var p = text.Split(' ');
-                        Commands.Remove(p[1]);
+                        var parts = text.Split(' ');
+                        if (parts.Length < 2) continue;
+
+                        Commands.Remove(parts[1]);
                         SaveCommands();
-                        await Send(http, chatId, "❌ Видалено");
+
+                        await Send(http, chatId, "❌ Команда видалена");
                         continue;
                     }
 
-                    // SEND ALL
+                    // 📢 РОЗСИЛКА
                     if (text.StartsWith("/send") && isAdmin)
                     {
-                        var msgText = text.Substring(5);
+                        var message = text.Substring(5).Trim();
 
-                        foreach (var u in Users)
+                        foreach (var user in Users)
                         {
-                            try { await Send(http, u, $"📢 {msgText}"); }
+                            try { await Send(http, user, $"📢 {message}"); }
                             catch { }
                         }
 
-                        await Send(http, chatId, "✅ Розіслано");
+                        await Send(http, chatId, "✅ Розіслано всім");
                         continue;
                     }
 
-                    // CUSTOM
+                    // 🤖 КАСТОМ КОМАНДИ
                     if (Commands.ContainsKey(text))
                     {
                         await Send(http, chatId, Commands[text]);
                         continue;
                     }
 
-                    // START
+                    // 📅 START
                     if (text == "/start")
                     {
                         await Send(http, chatId, "📚 Завантажую розклад...");
+
                         var days = await ParseSchedule(url);
 
-                        foreach (var d in days)
+                        foreach (var day in days)
                         {
-                            await Send(http, chatId, d);
+                            await Send(http, chatId, day);
                             await Task.Delay(300);
                         }
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine("ERROR: " + ex.Message);
                 await Task.Delay(3000);
             }
         }
     }
 
-    static async Task Send(HttpClient http, long id, string text)
+    static async Task Send(HttpClient http, long chatId, string text)
     {
-        await http.PostAsJsonAsync("sendMessage", new { chat_id = id, text });
+        await http.PostAsJsonAsync("sendMessage", new
+        {
+            chat_id = chatId,
+            text = text
+        });
     }
 
     static void SaveAdmins() => File.WriteAllLines(adminsFile, Admins.Select(x => x.ToString()));
+
     static void LoadAdmins()
     {
         if (!File.Exists(adminsFile)) return;
-        foreach (var l in File.ReadAllLines(adminsFile))
-            if (long.TryParse(l, out long id)) Admins.Add(id);
+
+        foreach (var line in File.ReadAllLines(adminsFile))
+            if (long.TryParse(line, out long id))
+                Admins.Add(id);
     }
 
     static void SaveCommands()
@@ -265,9 +291,12 @@ class Program
     static void LoadCommands()
     {
         if (!File.Exists(commandsFile)) return;
-        Commands = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(commandsFile));
+
+        Commands = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(commandsFile))
+                   ?? new Dictionary<string, string>();
     }
 
+    // 🎨 КРАСИВИЙ РОЗКЛАД
     static async Task<List<string>> ParseSchedule(string url)
     {
         using var http = new HttpClient();
@@ -282,6 +311,9 @@ class Program
         var result = new List<string>();
 
         var tables = doc.DocumentNode.SelectNodes("//table");
+        if (tables == null) return result;
+
+        int dayIndex = 1;
 
         foreach (var table in tables)
         {
@@ -290,7 +322,7 @@ class Program
 
             var sb = new StringBuilder();
 
-            sb.AppendLine("📅 Розклад дня\n");
+            sb.AppendLine($"📅 Розклад дня #{dayIndex}\n");
 
             foreach (var row in rows)
             {
@@ -315,7 +347,12 @@ class Program
                 sb.AppendLine($"📖 {subject}\n");
             }
 
-            result.Add(sb.ToString());
+            var text = sb.ToString().Trim();
+
+            if (!string.IsNullOrWhiteSpace(text))
+                result.Add(text);
+
+            dayIndex++;
         }
 
         return result;
