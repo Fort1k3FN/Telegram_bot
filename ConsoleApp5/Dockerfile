@@ -23,12 +23,14 @@ RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
     && apt-get install -y ./google-chrome-stable_current_amd64.deb
 
 
-# Install ChromeDriver
-RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/146.0.7680.164/linux64/chromedriver-linux64.zip \
-    && unzip chromedriver-linux64.zip \
-    && mv chromedriver-linux64/chromedriver /usr/bin/chromedriver \
-    && chmod +x /usr/bin/chromedriver
-
+# Install ChromeDriver (latest)
+RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/LATEST_RELEASE \
+    -O /tmp/chromeversion && \
+    CHROME_VERSION=$(cat /tmp/chromeversion) && \
+    wget -q https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip && \
+    unzip chromedriver-linux64.zip && \
+    mv chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
+    chmod +x /usr/bin/chromedriver
 COPY --from=build /app .
 
 CMD ["dotnet", "ConsoleApp5.dll"]
