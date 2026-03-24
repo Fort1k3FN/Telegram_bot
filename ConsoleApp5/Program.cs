@@ -8,16 +8,25 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using HtmlAgilityPack;
 using System.Text.RegularExpressions;
+using System.IO;
 
 class Program
 {
+    static HashSet<long> Admins = new() { 828027108 }; // ТИ ГОЛОВНИЙ АДМІН
+
+    static Dictionary<string, string> CustomCommands = new();
+
     static string LastSnapshot = "";
     static List<long> Subscribers = new();
+
+    static string adminsFile = "admins.txt";
 
     static async Task Main()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Console.OutputEncoding = Encoding.UTF8;
+
+        LoadAdmins();
 
         string token = "8360154496:AAFZ85zfNtpF8yzrMzFvXfwqC9mAnp-iV8E";
         string url = "https://asu-srv.pnu.edu.ua/cgi-bin/timetable.cgi?n=700&group=-4975";
@@ -31,7 +40,7 @@ class Program
 
         Console.WriteLine("BOT STARTED");
 
-        // 🔥 ФОН ПЕРЕВІРКИ КОЖНІ 30 СЕК
+        // 🔥 авто перевірка змін
         _ = Task.Run(async () =>
         {
             while (true)
@@ -57,7 +66,6 @@ class Program
             }
         });
 
-        // 🔥 TELEGRAM LOOP
         while (true)
         {
             try
@@ -73,25 +81,106 @@ class Program
                     offset = upd.GetProperty("update_id").GetInt32() + 1;
 
                     if (!upd.TryGetProperty("message", out var msg)) continue;
-                    if (!msg.TryGetProperty("text", out var textEl)) continue;
 
-                    var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
                     if (!Subscribers.Contains(chatId))
                         Subscribers.Add(chatId);
 
+                    if (!msg.TryGetProperty("text", out var textEl)) continue;
+
+                    var text = textEl.GetString() ?? "";
+
+                    Console.WriteLine($"MSG: {text}");
+
+                    bool isAdmin = Admins.Contains(chatId);
+
+                    // 🔐 АДМІН ПАНЕЛЬ
+                    if (text == "@admin" && isAdmin)
+                    {
+                        await SendAdminPanel(http, chatId);
+                        continue;
+                    }
+
+                    // ➕ ДОДАТИ АДМІНА
+                    if (text.StartsWith("/addadmin") && isAdmin)
+                    {
+                        var parts = text.Split(' ');
+
+                        if (parts.Length < 2)
+                        {
+                            await Send(http, chatId, "❌ Формат: /addadmin ID");
+                            continue;
+                        }
+
+                        if (long.TryParse(parts[1], out long newAdmin))
+                        {
+                            Admins.Add(newAdmin);
+                            SaveAdmins();
+                            await Send(http, chatId, "✅ Адміна додано");
+                        }
+
+                        continue;
+                    }
+
+                    // ❌ ВИДАЛИТИ АДМІНА
+                    if (text.StartsWith("/deladmin") && isAdmin)
+                    {
+                        var parts = text.Split(' ');
+
+                        if (parts.Length < 2) continue;
+
+                        if (long.TryParse(parts[1], out long delAdmin))
+                        {
+                            Admins.Remove(delAdmin);
+                            SaveAdmins();
+                            await Send(http, chatId, "🗑 Адміна видалено");
+                        }
+
+                        continue;
+                    }
+
+                    // ➕ ДОДАТИ КОМАНДУ
+                    if (text.StartsWith("/add") && isAdmin)
+                    {
+                        var parts = text.Split(' ', 3);
+
+                        if (parts.Length < 3)
+                        {
+                            await Send(http, chatId, "❌ Формат: /add команда текст");
+                            continue;
+                        }
+
+                        CustomCommands[parts[1]] = parts[2];
+                        await Send(http, chatId, "✅ Додано");
+                        continue;
+                    }
+
+                    // ❌ ВИДАЛИТИ КОМАНДУ
+                    if (text.StartsWith("/del") && isAdmin)
+                    {
+                        var parts = text.Split(' ', 2);
+
+                        if (parts.Length < 2) continue;
+
+                        CustomCommands.Remove(parts[1]);
+                        await Send(http, chatId, "🗑 Видалено");
+                        continue;
+                    }
+
+                    // 🤖 КАСТОМ КОМАНДИ
+                    if (CustomCommands.ContainsKey(text))
+                    {
+                        await Send(http, chatId, CustomCommands[text]);
+                        continue;
+                    }
+
+                    // 📅 РОЗКЛАД
                     if (text.StartsWith("/start"))
                     {
                         await Send(http, chatId, "📚 Завантажую розклад...");
 
                         var days = await ParseSchedule(url);
-
-                        if (days.Count == 0)
-                        {
-                            await Send(http, chatId, "❌ Не вдалося знайти розклад");
-                            continue;
-                        }
 
                         await Send(http, chatId, "📅 Розклад на наступний тиждень:");
 
@@ -111,6 +200,22 @@ class Program
         }
     }
 
+    static void LoadAdmins()
+    {
+        if (!File.Exists(adminsFile)) return;
+
+        var lines = File.ReadAllLines(adminsFile);
+
+        foreach (var l in lines)
+            if (long.TryParse(l, out long id))
+                Admins.Add(id);
+    }
+
+    static void SaveAdmins()
+    {
+        File.WriteAllLines(adminsFile, Admins.Select(x => x.ToString()));
+    }
+
     static async Task Send(HttpClient http, long chatId, string text)
     {
         await http.PostAsJsonAsync("sendMessage", new
@@ -120,12 +225,33 @@ class Program
         });
     }
 
+    static async Task SendAdminPanel(HttpClient http, long chatId)
+    {
+        var keyboard = new
+        {
+            inline_keyboard = new[]
+            {
+                new[]
+                {
+                    new { text = "➕ Команда", callback_data = "cmd" },
+                    new { text = "👤 Адміни", callback_data = "admins" }
+                }
+            }
+        };
+
+        await http.PostAsJsonAsync("sendMessage", new
+        {
+            chat_id = chatId,
+            text = "⚙️ Адмін панель\n\n/addadmin ID\n/deladmin ID",
+            reply_markup = keyboard
+        });
+    }
+
     static async Task<List<string>> ParseSchedule(string url)
     {
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
 
-        // ✅ FIX ІЄРОГЛІФІВ
         var bytes = await http.GetByteArrayAsync(url);
         var html = Encoding.GetEncoding("windows-1251").GetString(bytes);
 
@@ -134,68 +260,42 @@ class Program
 
         var result = new List<string>();
 
-        var days = new Dictionary<string, string>
-        {
-            { "Понеділок", "📘 Розклад на понеділок" },
-            { "Вівторок", "📗 Розклад на вівторок" },
-            { "Середа", "📙 Розклад на середу" },
-            { "Четвер", "📕 Розклад на четвер" },
-            { "П'ятниця", "📓 Розклад на п'ятницю" }
-        };
+        var tables = doc.DocumentNode.SelectNodes("//table");
+        if (tables == null) return result;
 
-        foreach (var day in days)
+        foreach (var table in tables)
         {
-            if (!html.Contains(day.Key)) continue;
-
-            var tables = doc.DocumentNode.SelectNodes("//table");
-            if (tables == null) continue;
+            var rows = table.SelectNodes(".//tr");
+            if (rows == null) continue;
 
             var sb = new StringBuilder();
-            sb.AppendLine(day.Value + "\n");
 
-            bool hasLessons = false;
-
-            foreach (var table in tables)
+            foreach (var row in rows)
             {
-                var rows = table.SelectNodes(".//tr");
-                if (rows == null) continue;
+                var cols = row.SelectNodes(".//td");
+                if (cols == null || cols.Count < 3) continue;
 
-                foreach (var row in rows)
-                {
-                    var cols = row.SelectNodes(".//td");
-                    if (cols == null || cols.Count < 3) continue;
+                var timeRaw = cols[1].InnerText.Trim();
+                var subject = cols[2].InnerText.Trim();
 
-                    var num = cols[0].InnerText.Trim();
-                    var timeRaw = cols[1].InnerText.Trim();
-                    var subject = cols[2].InnerText.Trim();
+                var times = Regex.Matches(timeRaw, @"\d{2}:\d{2}")
+                                 .Select(x => x.Value)
+                                 .ToArray();
 
-                    if (string.IsNullOrWhiteSpace(timeRaw)) continue;
+                string time = times.Length >= 2
+                    ? $"{times[0]} - {times[1]}"
+                    : timeRaw;
 
-                    // 🔥 FIX ЧАСУ
-                    var times = Regex.Matches(timeRaw, @"\d{2}:\d{2}")
-                                     .Select(x => x.Value)
-                                     .ToArray();
+                if (string.IsNullOrWhiteSpace(subject))
+                    subject = "Пари немає";
 
-                    string time = times.Length >= 2
-                        ? $"{times[0]} - {times[1]}"
-                        : timeRaw;
-
-                    if (string.IsNullOrWhiteSpace(subject))
-                        subject = "Пари немає";
-
-                    sb.AppendLine($"⏰ {time}");
-                    sb.AppendLine($"📖 {subject}\n");
-
-                    hasLessons = true;
-                }
+                sb.AppendLine($"{time} - {subject}");
             }
 
-            if (!hasLessons)
-            {
-                sb.AppendLine("😴 Пари немає");
-            }
+            var text = sb.ToString().Trim();
 
-            result.Add(sb.ToString());
+            if (!string.IsNullOrWhiteSpace(text))
+                result.Add(text);
         }
 
         return result;
