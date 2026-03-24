@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     libdbus-1-3 libnspr4 libnss3 libx11-xcb1 \
     libxcomposite1 libxdamage1 libxrandr2 xdg-utils \
     libgbm1 libgtk-3-0 libxshmfence1
+    chromium-driver
 
 # Install Chrome
 RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
