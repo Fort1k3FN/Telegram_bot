@@ -302,7 +302,7 @@ class Program
     {
         var options = new ChromeOptions();
 
-        options.AddArgument("--headless=new");
+        options.AddArgument("--headless");
         options.AddArgument("--no-sandbox");
         options.AddArgument("--disable-dev-shm-usage");
         options.AddArgument("--disable-gpu");
