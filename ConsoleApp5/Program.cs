@@ -308,13 +308,30 @@ class Program
         options.AddArgument("--disable-gpu");
         options.AddArgument("--window-size=1920,1080");
 
+        if (OperatingSystem.IsLinux())
+        {
+            options.BinaryLocation = "/usr/bin/google-chrome";
+        }
+
+        IWebDriver driver;
+
+        if (OperatingSystem.IsLinux())
+        {
+            options.BinaryLocation = "/usr/bin/google-chrome";
+            driver = new ChromeDriver("/usr/bin", options);
+        }
+        else
+        {
+            driver = new ChromeDriver(options);
+        }
+
         // ВАЖЛИВО: тільки для Linux (Render)
         if (OperatingSystem.IsLinux())
         {
             options.BinaryLocation = "/usr/bin/google-chrome";
         }
 
-        using var driver = new ChromeDriver(options);
+        using var driver = new ChromeDriver("/usr/bin", options);
         try
         {
             driver.Navigate().GoToUrl(url);
@@ -492,6 +509,12 @@ class Program
                     if (!string.IsNullOrWhiteSpace(block)) dayMessages.Add(block);
                 }
             }
+
+            var order = new[] { "Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя" };
+
+            dayMessages = dayMessages
+                .OrderBy(d => order.ToList().FindIndex(x => d.Contains(x)))
+                .ToList();
 
             return dayMessages;
         }

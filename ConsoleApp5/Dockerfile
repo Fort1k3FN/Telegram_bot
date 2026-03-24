@@ -11,7 +11,7 @@ WORKDIR /app
 
 # Chrome dependencies
 RUN apt-get update && apt-get install -y \
-    wget unzip curl gnupg ca-certificates \
+    wget curl gnupg ca-certificates \
     fonts-liberation libappindicator3-1 libasound2 \
     libatk-bridge2.0-0 libatk1.0-0 libcups2 \
     libdbus-1-3 libnspr4 libnss3 libx11-xcb1 \
@@ -22,15 +22,6 @@ RUN apt-get update && apt-get install -y \
 RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get install -y ./google-chrome-stable_current_amd64.deb
 
-
-# Install ChromeDriver (latest)
-RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/LATEST_RELEASE \
-    -O /tmp/chromeversion && \
-    CHROME_VERSION=$(cat /tmp/chromeversion) && \
-    wget -q https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip && \
-    unzip chromedriver-linux64.zip && \
-    mv chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
-    chmod +x /usr/bin/chromedriver
 COPY --from=build /app .
 
 CMD ["dotnet", "ConsoleApp5.dll"]
