@@ -307,11 +307,12 @@ class Program
         options.AddArgument("--disable-dev-shm-usage");
         options.AddArgument("--disable-gpu");
         options.AddArgument("--window-size=1920,1080");
-        options.AddArgument("--disable-blink-features=AutomationControlled");
-        options.AddArgument("--remote-debugging-port=9222");
-        options.AddArgument("--single-process");
-        options.AddArgument("--no-zygote");
-        options.BinaryLocation = "/usr/bin/google-chrome";
+
+        // ВАЖЛИВО: тільки для Linux (Render)
+        if (OperatingSystem.IsLinux())
+        {
+            options.BinaryLocation = "/usr/bin/google-chrome";
+        }
 
         using var driver = new ChromeDriver(options);
         try
