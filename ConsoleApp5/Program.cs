@@ -12,14 +12,15 @@ using System.IO;
 
 class Program
 {
-    static HashSet<long> Admins = new() { 828027108 }; // ТИ ГОЛОВНИЙ АДМІН
+    static HashSet<long> Admins = new() { 828027108 };
+    static Dictionary<string, string> Commands = new();
 
-    static Dictionary<string, string> CustomCommands = new();
-
-    static string LastSnapshot = "";
-    static List<long> Subscribers = new();
+    static List<long> Users = new();
 
     static string adminsFile = "admins.txt";
+    static string commandsFile = "commands.json";
+
+    static string LastSnapshot = "";
 
     static async Task Main()
     {
@@ -27,6 +28,7 @@ class Program
         Console.OutputEncoding = Encoding.UTF8;
 
         LoadAdmins();
+        LoadCommands();
 
         string token = "8360154496:AAFZ85zfNtpF8yzrMzFvXfwqC9mAnp-iV8E";
         string url = "https://asu-srv.pnu.edu.ua/cgi-bin/timetable.cgi?n=700&group=-4975";
@@ -40,25 +42,23 @@ class Program
 
         Console.WriteLine("BOT STARTED");
 
-        // 🔥 авто перевірка змін
+        // 🔥 анти-сон + перевірка змін
         _ = Task.Run(async () =>
         {
             while (true)
             {
                 try
                 {
-                    var days = await ParseSchedule(url);
-                    var snapshot = string.Join("\n", days);
+                    var data = await ParseSchedule(url);
+                    var snap = string.Join("\n", data);
 
-                    if (LastSnapshot != "" && snapshot != LastSnapshot)
+                    if (LastSnapshot != "" && snap != LastSnapshot)
                     {
-                        foreach (var user in Subscribers)
-                        {
-                            await Send(http, user, "⚠️ Розклад змінився!");
-                        }
+                        foreach (var u in Users)
+                            await Send(http, u, "⚠️ Розклад змінився!");
                     }
 
-                    LastSnapshot = snapshot;
+                    LastSnapshot = snap;
                 }
                 catch { }
 
@@ -80,109 +80,154 @@ class Program
                 {
                     offset = upd.GetProperty("update_id").GetInt32() + 1;
 
+                    // CALLBACK
+                    if (upd.TryGetProperty("callback_query", out var cb))
+                    {
+                        var chatId = cb.GetProperty("message").GetProperty("chat").GetProperty("id").GetInt64();
+                        var data = cb.GetProperty("data").GetString();
+
+                        if (!Admins.Contains(chatId)) continue;
+
+                        if (data == "add")
+                            await Send(http, chatId, "✏️ /add команда текст");
+
+                        if (data == "del")
+                            await Send(http, chatId, "❌ /del команда");
+
+                        if (data == "send")
+                            await Send(http, chatId, "📢 /send текст");
+
+                        continue;
+                    }
+
                     if (!upd.TryGetProperty("message", out var msg)) continue;
-
-                    var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
-
-                    if (!Subscribers.Contains(chatId))
-                        Subscribers.Add(chatId);
-
                     if (!msg.TryGetProperty("text", out var textEl)) continue;
 
                     var text = textEl.GetString() ?? "";
+                    var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
-                    Console.WriteLine($"MSG: {text}");
+                    if (!Users.Contains(chatId))
+                        Users.Add(chatId);
 
                     bool isAdmin = Admins.Contains(chatId);
 
-                    // 🔐 АДМІН ПАНЕЛЬ
-                    if (text == "@admin" && isAdmin)
+                    // ID
+                    if (text == "/id")
                     {
-                        await SendAdminPanel(http, chatId);
+                        await Send(http, chatId, $"🆔 Твій ID: {chatId}");
                         continue;
                     }
 
-                    // ➕ ДОДАТИ АДМІНА
+                    // АДМІН ПАНЕЛЬ
+                    if (text == "/admin" && isAdmin)
+                    {
+                        var kb = new
+                        {
+                            inline_keyboard = new[]
+                            {
+                                new[]
+                                {
+                                    new { text = "➕ Команда", callback_data = "add" },
+                                    new { text = "❌ Видалити", callback_data = "del" }
+                                },
+                                new[]
+                                {
+                                    new { text = "📢 Розсилка", callback_data = "send" }
+                                }
+                            }
+                        };
+
+                        await http.PostAsJsonAsync("sendMessage", new
+                        {
+                            chat_id = chatId,
+                            text = "⚙️ Адмін панель",
+                            reply_markup = kb
+                        });
+
+                        continue;
+                    }
+
+                    // HELP
+                    if (text == "/ahelp" && isAdmin)
+                    {
+                        await Send(http, chatId,
+@"👑 Адмін команди:
+
+/admin - панель
+/add cmd текст
+/del cmd
+/send текст
+/addadmin ID
+/deladmin ID
+/id");
+                        continue;
+                    }
+
+                    // ADMIN ADD
                     if (text.StartsWith("/addadmin") && isAdmin)
                     {
-                        var parts = text.Split(' ');
-
-                        if (parts.Length < 2)
-                        {
-                            await Send(http, chatId, "❌ Формат: /addadmin ID");
-                            continue;
-                        }
-
-                        if (long.TryParse(parts[1], out long newAdmin))
-                        {
-                            Admins.Add(newAdmin);
-                            SaveAdmins();
-                            await Send(http, chatId, "✅ Адміна додано");
-                        }
-
-                        continue;
-                    }
-
-                    // ❌ ВИДАЛИТИ АДМІНА
-                    if (text.StartsWith("/deladmin") && isAdmin)
-                    {
-                        var parts = text.Split(' ');
-
-                        if (parts.Length < 2) continue;
-
-                        if (long.TryParse(parts[1], out long delAdmin))
-                        {
-                            Admins.Remove(delAdmin);
-                            SaveAdmins();
-                            await Send(http, chatId, "🗑 Адміна видалено");
-                        }
-
-                        continue;
-                    }
-
-                    // ➕ ДОДАТИ КОМАНДУ
-                    if (text.StartsWith("/add") && isAdmin)
-                    {
-                        var parts = text.Split(' ', 3);
-
-                        if (parts.Length < 3)
-                        {
-                            await Send(http, chatId, "❌ Формат: /add команда текст");
-                            continue;
-                        }
-
-                        CustomCommands[parts[1]] = parts[2];
+                        var id = long.Parse(text.Split(' ')[1]);
+                        Admins.Add(id);
+                        SaveAdmins();
                         await Send(http, chatId, "✅ Додано");
                         continue;
                     }
 
-                    // ❌ ВИДАЛИТИ КОМАНДУ
+                    if (text.StartsWith("/deladmin") && isAdmin)
+                    {
+                        var id = long.Parse(text.Split(' ')[1]);
+                        Admins.Remove(id);
+                        SaveAdmins();
+                        await Send(http, chatId, "❌ Видалено");
+                        continue;
+                    }
+
+                    // COMMANDS SAVE
+                    if (text.StartsWith("/add") && isAdmin)
+                    {
+                        var p = text.Split(' ', 3);
+                        Commands[p[1]] = p[2];
+                        SaveCommands();
+                        await Send(http, chatId, "✅ Додано");
+                        continue;
+                    }
+
                     if (text.StartsWith("/del") && isAdmin)
                     {
-                        var parts = text.Split(' ', 2);
-
-                        if (parts.Length < 2) continue;
-
-                        CustomCommands.Remove(parts[1]);
-                        await Send(http, chatId, "🗑 Видалено");
+                        var p = text.Split(' ');
+                        Commands.Remove(p[1]);
+                        SaveCommands();
+                        await Send(http, chatId, "❌ Видалено");
                         continue;
                     }
 
-                    // 🤖 КАСТОМ КОМАНДИ
-                    if (CustomCommands.ContainsKey(text))
+                    // SEND ALL
+                    if (text.StartsWith("/send") && isAdmin)
                     {
-                        await Send(http, chatId, CustomCommands[text]);
+                        var msgText = text.Substring(5);
+
+                        foreach (var u in Users)
+                        {
+                            try { await Send(http, u, $"📢 {msgText}"); }
+                            catch { }
+                        }
+
+                        await Send(http, chatId, "✅ Розіслано");
                         continue;
                     }
 
-                    // 📅 РОЗКЛАД
-                    if (text.StartsWith("/start"))
+                    // CUSTOM
+                    if (Commands.ContainsKey(text))
+                    {
+                        await Send(http, chatId, Commands[text]);
+                        continue;
+                    }
+
+                    // START
+                    if (text == "/start")
                     {
                         await Send(http, chatId, "📚 Завантажую розклад...");
-
                         var days = await ParseSchedule(url);
-
-                        await Send(http, chatId, "📅 Розклад на наступний тиждень:");
 
                         foreach (var d in days)
                         {
@@ -192,59 +237,35 @@ class Program
                     }
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine("ERROR: " + ex.Message);
-                await Task.Delay(5000);
+                await Task.Delay(3000);
             }
         }
     }
 
+    static async Task Send(HttpClient http, long id, string text)
+    {
+        await http.PostAsJsonAsync("sendMessage", new { chat_id = id, text });
+    }
+
+    static void SaveAdmins() => File.WriteAllLines(adminsFile, Admins.Select(x => x.ToString()));
     static void LoadAdmins()
     {
         if (!File.Exists(adminsFile)) return;
-
-        var lines = File.ReadAllLines(adminsFile);
-
-        foreach (var l in lines)
-            if (long.TryParse(l, out long id))
-                Admins.Add(id);
+        foreach (var l in File.ReadAllLines(adminsFile))
+            if (long.TryParse(l, out long id)) Admins.Add(id);
     }
 
-    static void SaveAdmins()
+    static void SaveCommands()
     {
-        File.WriteAllLines(adminsFile, Admins.Select(x => x.ToString()));
+        File.WriteAllText(commandsFile, JsonSerializer.Serialize(Commands));
     }
 
-    static async Task Send(HttpClient http, long chatId, string text)
+    static void LoadCommands()
     {
-        await http.PostAsJsonAsync("sendMessage", new
-        {
-            chat_id = chatId,
-            text = text
-        });
-    }
-
-    static async Task SendAdminPanel(HttpClient http, long chatId)
-    {
-        var keyboard = new
-        {
-            inline_keyboard = new[]
-            {
-                new[]
-                {
-                    new { text = "➕ Команда", callback_data = "cmd" },
-                    new { text = "👤 Адміни", callback_data = "admins" }
-                }
-            }
-        };
-
-        await http.PostAsJsonAsync("sendMessage", new
-        {
-            chat_id = chatId,
-            text = "⚙️ Адмін панель\n\n/addadmin ID\n/deladmin ID",
-            reply_markup = keyboard
-        });
+        if (!File.Exists(commandsFile)) return;
+        Commands = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(commandsFile));
     }
 
     static async Task<List<string>> ParseSchedule(string url)
@@ -261,7 +282,6 @@ class Program
         var result = new List<string>();
 
         var tables = doc.DocumentNode.SelectNodes("//table");
-        if (tables == null) return result;
 
         foreach (var table in tables)
         {
@@ -269,6 +289,8 @@ class Program
             if (rows == null) continue;
 
             var sb = new StringBuilder();
+
+            sb.AppendLine("📅 Розклад дня\n");
 
             foreach (var row in rows)
             {
@@ -287,15 +309,13 @@ class Program
                     : timeRaw;
 
                 if (string.IsNullOrWhiteSpace(subject))
-                    subject = "Пари немає";
+                    subject = "😴 Пари немає";
 
-                sb.AppendLine($"{time} - {subject}");
+                sb.AppendLine($"⏰ {time}");
+                sb.AppendLine($"📖 {subject}\n");
             }
 
-            var text = sb.ToString().Trim();
-
-            if (!string.IsNullOrWhiteSpace(text))
-                result.Add(text);
+            result.Add(sb.ToString());
         }
 
         return result;
