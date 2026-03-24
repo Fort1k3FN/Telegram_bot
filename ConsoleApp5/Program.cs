@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HtmlAgilityPack;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 class Program
@@ -15,12 +16,9 @@ class Program
 
     static async Task Main()
     {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Console.OutputEncoding = Encoding.UTF8;
 
-        string token = Environment.GetEnvironmentVariable("BOT_TOKEN")
-                       ?? "ТУТ_СВІЙ_ТОКЕН";
-
+        string token = "8360154496:AAFZ85zfNtpF8yzrMzFvXfwqC9mAnp-iV8E";
         string url = "https://asu-srv.pnu.edu.ua/cgi-bin/timetable.cgi?n=700&group=-4975";
 
         using var http = new HttpClient
@@ -29,48 +27,38 @@ class Program
         };
 
         int offset = 0;
-        long? lastUser = null;
 
         Console.WriteLine("BOT STARTED");
 
-        // 🔥 Фоновий таск (перевірка змін)
+        // 🔁 фоновий чек змін
         _ = Task.Run(async () =>
         {
             while (true)
             {
                 try
                 {
-                    var current = await GetRawSchedule(url);
+                    var days = await ParseSchedule(url);
+                    var snapshot = string.Join("\n", days);
 
-                    if (!string.IsNullOrEmpty(lastSnapshot) && current != lastSnapshot && lastUser != null)
+                    if (!string.IsNullOrEmpty(lastSnapshot) && snapshot != lastSnapshot)
                     {
-                        await Send(http, lastUser.Value, "⚠️ Розклад змінився!");
+                        Console.WriteLine("РОЗКЛАД ЗМІНИВСЯ");
+
+                        // ⚠️ встав свій chatId
+                        long chatId = 123456789;
+
+                        await http.PostAsJsonAsync("sendMessage", new
+                        {
+                            chat_id = chatId,
+                            text = "⚠️ Розклад змінився!"
+                        });
                     }
 
-                    lastSnapshot = current;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("CHECK ERROR: " + ex.Message);
-                }
-
-                await Task.Delay(30000);
-            }
-        });
-
-        // 🔥 анти-сон (пінг самого себе)
-        _ = Task.Run(async () =>
-        {
-            using var pingHttp = new HttpClient();
-            while (true)
-            {
-                try
-                {
-                    await pingHttp.GetAsync("https://google.com");
+                    lastSnapshot = snapshot;
                 }
                 catch { }
 
-                await Task.Delay(60000);
+                await Task.Delay(30000);
             }
         });
 
@@ -94,21 +82,19 @@ class Program
                     var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
-                    lastUser = chatId;
-
-                    Console.WriteLine($"MSG: {text}");
-
                     if (text.StartsWith("/start"))
                     {
-                        await Send(http, chatId, "⏳ Завантажую розклад...");
+                        await Send(http, chatId, "📅 Завантажую розклад...");
 
                         var days = await ParseSchedule(url);
 
                         if (days.Count == 0)
                         {
-                            await Send(http, chatId, "❌ Не знайдено розклад");
+                            await Send(http, chatId, "❌ Не вдалося знайти розклад");
                             continue;
                         }
+
+                        await Send(http, chatId, "📆 Розклад на наступний тиждень:\n");
 
                         foreach (var d in days)
                         {
@@ -131,47 +117,45 @@ class Program
         await http.PostAsJsonAsync("sendMessage", new
         {
             chat_id = chatId,
-            text = text,
-            parse_mode = "HTML"
+            text = text
         });
     }
 
-    // 🔥 СИРИЙ HTML (для перевірки змін)
-    static async Task<string> GetRawSchedule(string url)
-    {
-        using var http = new HttpClient();
-        http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
-
-        var bytes = await http.GetByteArrayAsync(url);
-        return Encoding.GetEncoding("windows-1251").GetString(bytes);
-    }
-
-    // 🔥 ОСНОВНИЙ ПАРСЕР
     static async Task<List<string>> ParseSchedule(string url)
     {
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
 
-        var bytes = await http.GetByteArrayAsync(url);
-        var html = Encoding.GetEncoding("windows-1251").GetString(bytes);
+        var html = await http.GetStringAsync(url);
 
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
         var result = new List<string>();
 
+        var days = new Dictionary<int, string>
+        {
+            {0, "Понеділок"},
+            {1, "Вівторок"},
+            {2, "Середа"},
+            {3, "Четвер"},
+            {4, "П'ятниця"}
+        };
+
         var tables = doc.DocumentNode.SelectNodes("//table");
         if (tables == null) return result;
 
-        foreach (var table in tables)
+        for (int i = 0; i < Math.Min(5, tables.Count); i++)
         {
+            var table = tables[i];
             var rows = table.SelectNodes(".//tr");
+
             if (rows == null) continue;
 
             var sb = new StringBuilder();
+            sb.AppendLine($"📚 Розклад дня на {days[i]}:\n");
 
-            sb.AppendLine("<b>📅 Розклад дня</b>");
-            sb.AppendLine("━━━━━━━━━━━━━━");
+            bool hasLessons = false;
 
             foreach (var row in rows)
             {
@@ -182,33 +166,31 @@ class Program
                 var timeRaw = cols[1].InnerText.Trim();
                 var subject = cols[2].InnerText.Trim();
 
-                // 🔥 ФІКС ЧАСУ
-                var times = System.Text.RegularExpressions.Regex
-                    .Matches(timeRaw, @"\d{2}:\d{2}")
-                    .Cast<System.Text.RegularExpressions.Match>()
-                    .Select(m => m.Value)
+                if (string.IsNullOrWhiteSpace(timeRaw)) continue;
+
+                // 🔥 FIX ЧАСУ
+                var times = Regex.Matches(timeRaw, @"\d{2}:\d{2}")
+                    .Select(x => x.Value)
                     .ToList();
 
-                string time = times.Count >= 2
-                    ? $"{times[0]} - {times[1]}"
-                    : timeRaw;
+                string time = timeRaw;
 
-                // 🔥 ЯКЩО НЕМАЄ ПАРИ
+                if (times.Count >= 2)
+                    time = $"{times[0]} - {times[1]}";
+
                 if (string.IsNullOrWhiteSpace(subject))
                     subject = "Пари немає";
 
-                var number = num.Replace(".", "").Trim();
+                sb.AppendLine($"🕐 {num}. {time}");
+                sb.AppendLine($"📖 {subject}\n");
 
-                sb.AppendLine($"🔹 <b>Пара {number}</b>");
-                sb.AppendLine($"⏰ {time}");
-                sb.AppendLine($"📘 {subject}");
-                sb.AppendLine("──────────────");
+                hasLessons = true;
             }
 
-            var text = sb.ToString().Trim();
+            if (!hasLessons)
+                sb.AppendLine("😴 Пари немає");
 
-            if (!string.IsNullOrWhiteSpace(text))
-                result.Add(text);
+            result.Add(sb.ToString());
         }
 
         return result;
