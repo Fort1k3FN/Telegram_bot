@@ -8,14 +8,15 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using HtmlAgilityPack;
 using System.Text.RegularExpressions;
-using System.Threading;
 
 class Program
 {
-    static string lastSnapshot = "";
+    static string LastSnapshot = "";
+    static List<long> Subscribers = new();
 
     static async Task Main()
     {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Console.OutputEncoding = Encoding.UTF8;
 
         string token = "8360154496:AAFZ85zfNtpF8yzrMzFvXfwqC9mAnp-iV8E";
@@ -30,7 +31,7 @@ class Program
 
         Console.WriteLine("BOT STARTED");
 
-        // 🔁 фоновий чек змін
+        // 🔥 ФОН ПЕРЕВІРКИ КОЖНІ 30 СЕК
         _ = Task.Run(async () =>
         {
             while (true)
@@ -40,21 +41,15 @@ class Program
                     var days = await ParseSchedule(url);
                     var snapshot = string.Join("\n", days);
 
-                    if (!string.IsNullOrEmpty(lastSnapshot) && snapshot != lastSnapshot)
+                    if (LastSnapshot != "" && snapshot != LastSnapshot)
                     {
-                        Console.WriteLine("РОЗКЛАД ЗМІНИВСЯ");
-
-                        // ⚠️ встав свій chatId
-                        long chatId = 123456789;
-
-                        await http.PostAsJsonAsync("sendMessage", new
+                        foreach (var user in Subscribers)
                         {
-                            chat_id = chatId,
-                            text = "⚠️ Розклад змінився!"
-                        });
+                            await Send(http, user, "⚠️ Розклад змінився!");
+                        }
                     }
 
-                    lastSnapshot = snapshot;
+                    LastSnapshot = snapshot;
                 }
                 catch { }
 
@@ -62,6 +57,7 @@ class Program
             }
         });
 
+        // 🔥 TELEGRAM LOOP
         while (true)
         {
             try
@@ -82,9 +78,12 @@ class Program
                     var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
+                    if (!Subscribers.Contains(chatId))
+                        Subscribers.Add(chatId);
+
                     if (text.StartsWith("/start"))
                     {
-                        await Send(http, chatId, "📅 Завантажую розклад...");
+                        await Send(http, chatId, "📚 Завантажую розклад...");
 
                         var days = await ParseSchedule(url);
 
@@ -94,12 +93,12 @@ class Program
                             continue;
                         }
 
-                        await Send(http, chatId, "📆 Розклад на наступний тиждень:\n");
+                        await Send(http, chatId, "📅 Розклад на наступний тиждень:");
 
                         foreach (var d in days)
                         {
                             await Send(http, chatId, d);
-                            await Task.Delay(400);
+                            await Task.Delay(300);
                         }
                     }
                 }
@@ -126,69 +125,75 @@ class Program
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
 
-        var html = await http.GetStringAsync(url);
+        // ✅ FIX ІЄРОГЛІФІВ
+        var bytes = await http.GetByteArrayAsync(url);
+        var html = Encoding.GetEncoding("windows-1251").GetString(bytes);
 
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
         var result = new List<string>();
 
-        var days = new Dictionary<int, string>
+        var days = new Dictionary<string, string>
         {
-            {0, "Понеділок"},
-            {1, "Вівторок"},
-            {2, "Середа"},
-            {3, "Четвер"},
-            {4, "П'ятниця"}
+            { "Понеділок", "📘 Розклад на понеділок" },
+            { "Вівторок", "📗 Розклад на вівторок" },
+            { "Середа", "📙 Розклад на середу" },
+            { "Четвер", "📕 Розклад на четвер" },
+            { "П'ятниця", "📓 Розклад на п'ятницю" }
         };
 
-        var tables = doc.DocumentNode.SelectNodes("//table");
-        if (tables == null) return result;
-
-        for (int i = 0; i < Math.Min(5, tables.Count); i++)
+        foreach (var day in days)
         {
-            var table = tables[i];
-            var rows = table.SelectNodes(".//tr");
+            if (!html.Contains(day.Key)) continue;
 
-            if (rows == null) continue;
+            var tables = doc.DocumentNode.SelectNodes("//table");
+            if (tables == null) continue;
 
             var sb = new StringBuilder();
-            sb.AppendLine($"📚 Розклад дня на {days[i]}:\n");
+            sb.AppendLine(day.Value + "\n");
 
             bool hasLessons = false;
 
-            foreach (var row in rows)
+            foreach (var table in tables)
             {
-                var cols = row.SelectNodes(".//td");
-                if (cols == null || cols.Count < 3) continue;
+                var rows = table.SelectNodes(".//tr");
+                if (rows == null) continue;
 
-                var num = cols[0].InnerText.Trim();
-                var timeRaw = cols[1].InnerText.Trim();
-                var subject = cols[2].InnerText.Trim();
+                foreach (var row in rows)
+                {
+                    var cols = row.SelectNodes(".//td");
+                    if (cols == null || cols.Count < 3) continue;
 
-                if (string.IsNullOrWhiteSpace(timeRaw)) continue;
+                    var num = cols[0].InnerText.Trim();
+                    var timeRaw = cols[1].InnerText.Trim();
+                    var subject = cols[2].InnerText.Trim();
 
-                // 🔥 FIX ЧАСУ
-                var times = Regex.Matches(timeRaw, @"\d{2}:\d{2}")
-                    .Select(x => x.Value)
-                    .ToList();
+                    if (string.IsNullOrWhiteSpace(timeRaw)) continue;
 
-                string time = timeRaw;
+                    // 🔥 FIX ЧАСУ
+                    var times = Regex.Matches(timeRaw, @"\d{2}:\d{2}")
+                                     .Select(x => x.Value)
+                                     .ToArray();
 
-                if (times.Count >= 2)
-                    time = $"{times[0]} - {times[1]}";
+                    string time = times.Length >= 2
+                        ? $"{times[0]} - {times[1]}"
+                        : timeRaw;
 
-                if (string.IsNullOrWhiteSpace(subject))
-                    subject = "Пари немає";
+                    if (string.IsNullOrWhiteSpace(subject))
+                        subject = "Пари немає";
 
-                sb.AppendLine($"🕐 {num}. {time}");
-                sb.AppendLine($"📖 {subject}\n");
+                    sb.AppendLine($"⏰ {time}");
+                    sb.AppendLine($"📖 {subject}\n");
 
-                hasLessons = true;
+                    hasLessons = true;
+                }
             }
 
             if (!hasLessons)
+            {
                 sb.AppendLine("😴 Пари немає");
+            }
 
             result.Add(sb.ToString());
         }
