@@ -318,7 +318,7 @@ class Program
         if (OperatingSystem.IsLinux())
         {
             options.BinaryLocation = "/usr/bin/google-chrome";
-            driver = new ChromeDriver("/usr/bin", options);
+            driver = new ChromeDriver(options);
         }
         else
         {
@@ -331,7 +331,6 @@ class Program
             options.BinaryLocation = "/usr/bin/google-chrome";
         }
 
-        using var driver = new ChromeDriver("/usr/bin", options);
         try
         {
             driver.Navigate().GoToUrl(url);
