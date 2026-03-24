@@ -310,6 +310,10 @@ class Program
         options.AddArgument("--remote-debugging-port=9222");
         options.AddArgument("--disable-software-rasterizer");
 
+        options.AddArgument("--ignore-certificate-errors");
+        options.AddArgument("--allow-insecure-localhost");
+        options.AddArgument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
+
         if (OperatingSystem.IsLinux())
         {
             options.BinaryLocation = "/usr/bin/google-chrome";
