@@ -16,6 +16,9 @@ class Program
     static Dictionary<string, string> Commands = new();
     static List<long> Users = new();
 
+    static Dictionary<long, DateTime> LastSeen = new();
+    static HashSet<long> SpyAdmins = new();
+
     static string adminsFile = "admins.txt";
     static string commandsFile = "commands.json";
     static string usersFile = "users.txt";
@@ -77,7 +80,7 @@ class Program
 
         Console.WriteLine("BOT STARTED");
 
-        // 🔥 НОВА ПЕРЕВІРКА ЗМІН (ТОП РІВЕНЬ)
+        // 🔥 ПЕРЕВІРКА ЗМІН
         _ = Task.Run(async () =>
         {
             while (true)
@@ -92,12 +95,9 @@ class Program
                         var oldData = LastSnapshot.Split("|||").ToList();
                         var changes = GetDetailedChanges(oldData, data);
 
-                        string message;
-
-                        if (changes.Count > 0)
-                            message = string.Join("\n", changes);
-                        else
-                            message = "⚠️ Розклад оновлено";
+                        string message = changes.Count > 0
+                            ? string.Join("\n", changes)
+                            : "⚠️ Розклад оновлено";
 
                         foreach (var u in Users)
                             await Send(http, u, message);
@@ -134,6 +134,8 @@ class Program
                     var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
+                    LastSeen[chatId] = DateTime.Now;
+
                     if (!Users.Contains(chatId))
                     {
                         Users.Add(chatId);
@@ -141,6 +143,68 @@ class Program
                     }
 
                     bool isAdmin = Admins.Contains(chatId);
+
+                    // 🕵️ SPY
+                    foreach (var admin in SpyAdmins)
+                    {
+                        if (admin == chatId) continue;
+
+                        var username = msg.GetProperty("from").TryGetProperty("username", out var u)
+                            ? "@" + u.GetString()
+                            : "без username";
+
+                        var name = msg.GetProperty("from").GetProperty("first_name").GetString();
+
+                        await Send(http, admin,
+$@"🕵️ Повідомлення
+
+👤 {name} ({username})
+🆔 {chatId}
+
+💬 {text}");
+                    }
+
+                    // 🟢 ONLINE
+                    if (text == "/online" && isAdmin)
+                    {
+                        var now = DateTime.Now;
+
+                        var online = LastSeen
+                            .Where(x => (now - x.Value).TotalMinutes < 5)
+                            .Select(x => x.Key)
+                            .ToList();
+
+                        if (online.Count == 0)
+                        {
+                            await Send(http, chatId, "😴 Ніхто не онлайн");
+                            continue;
+                        }
+
+                        var sb = new StringBuilder();
+                        sb.AppendLine("🟢 Онлайн:\n");
+
+                        foreach (var id in online)
+                            sb.AppendLine($"👤 {id}");
+
+                        await Send(http, chatId, sb.ToString());
+                        continue;
+                    }
+
+                    // 🕵️ SPY ON
+                    if (text == "/spy on" && isAdmin)
+                    {
+                        SpyAdmins.Add(chatId);
+                        await Send(http, chatId, "🕵️ Увімкнено");
+                        continue;
+                    }
+
+                    // 🕵️ SPY OFF
+                    if (text == "/spy off" && isAdmin)
+                    {
+                        SpyAdmins.Remove(chatId);
+                        await Send(http, chatId, "❌ Вимкнено");
+                        continue;
+                    }
 
                     if (text == "/id")
                     {
@@ -165,14 +229,17 @@ class Program
                     if (text == "/ahelp" && isAdmin)
                     {
                         await Send(http, chatId,
-@"👑 Адмін команди:
+@"👑 Адмін:
 /admin
 /add
 /del
 /send
 /addadmin
 /deladmin
-/id");
+/id
+/online
+/spy on
+/spy off");
                         continue;
                     }
 
@@ -265,18 +332,8 @@ class Program
         {
             if (oldData[i] == newData[i]) continue;
 
-            var newLines = newData[i].Split('\n');
-
             changes.Add("⚠️ ЗМІНИ В РОЗКЛАДІ\n");
-
-            if (newLines.Length > 0)
-                changes.Add(newLines[0] + "\n");
-
-            changes.Add("🔄 Було:\n");
-            changes.Add(oldData[i] + "\n");
-
-            changes.Add("➡️ Стало:\n");
-            changes.Add(newData[i] + "\n");
+            changes.Add(newData[i]);
 
             break;
         }
