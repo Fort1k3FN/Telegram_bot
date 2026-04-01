@@ -142,8 +142,8 @@ class Program
                     var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
-                    var username = msg.GetProperty("from").TryGetProperty("username", out var u)
-                        ? "@" + u.GetString()
+                    var username = msg.GetProperty("from").TryGetProperty("username", out var userProp)
+                        ? "@" + userProp.GetString()
                         : "без username";
 
                     Usernames[chatId] = username;
