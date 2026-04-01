@@ -12,18 +12,26 @@ using System.IO;
 
 class Program
 {
-    static HashSet<long> Admins = new() { 828027108 };
+    // ✅ ТУТ ВЖЕ 2 АДМІНА
+    static HashSet<long> Admins = new() { 828027108, 1034256806 };
+
     static Dictionary<string, string> Commands = new();
     static List<long> Users = new();
 
     static Dictionary<long, DateTime> LastSeen = new();
     static HashSet<long> SpyAdmins = new();
+    static Dictionary<long, string> Usernames = new();
 
     static string adminsFile = "admins.txt";
     static string commandsFile = "commands.json";
     static string usersFile = "users.txt";
 
     static string LastSnapshot = "";
+
+    static readonly HashSet<string> ProtectedCommands = new()
+    {
+        "/admin", "/ahelp", "/розклад", "📅 Розклад", "/start"
+    };
 
     static async Task Main()
     {
@@ -134,6 +142,11 @@ class Program
                     var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
+                    var username = msg.GetProperty("from").TryGetProperty("username", out var u)
+                        ? "@" + u.GetString()
+                        : "без username";
+
+                    Usernames[chatId] = username;
                     LastSeen[chatId] = DateTime.Now;
 
                     if (!Users.Contains(chatId))
@@ -148,10 +161,6 @@ class Program
                     foreach (var admin in SpyAdmins)
                     {
                         if (admin == chatId) continue;
-
-                        var username = msg.GetProperty("from").TryGetProperty("username", out var u)
-                            ? "@" + u.GetString()
-                            : "без username";
 
                         var name = msg.GetProperty("from").GetProperty("first_name").GetString();
 
@@ -184,13 +193,30 @@ $@"🕵️ Повідомлення
                         sb.AppendLine("🟢 Онлайн:\n");
 
                         foreach (var id in online)
-                            sb.AppendLine($"👤 {id}");
+                        {
+                            var name = Usernames.ContainsKey(id) ? Usernames[id] : "";
+                            sb.AppendLine($"👤 {id} {name}");
+                        }
 
                         await Send(http, chatId, sb.ToString());
                         continue;
                     }
 
-                    // 🕵️ SPY ON
+                    // 👑 СПИСОК АДМІНІВ
+                    if (text == "/admins" && isAdmin)
+                    {
+                        var sb = new StringBuilder("👑 Адміни:\n\n");
+
+                        foreach (var id in Admins)
+                        {
+                            var name = Usernames.ContainsKey(id) ? Usernames[id] : "";
+                            sb.AppendLine($"👤 {id} {name}");
+                        }
+
+                        await Send(http, chatId, sb.ToString());
+                        continue;
+                    }
+
                     if (text == "/spy on" && isAdmin)
                     {
                         SpyAdmins.Add(chatId);
@@ -198,7 +224,6 @@ $@"🕵️ Повідомлення
                         continue;
                     }
 
-                    // 🕵️ SPY OFF
                     if (text == "/spy off" && isAdmin)
                     {
                         SpyAdmins.Remove(chatId);
@@ -214,41 +239,56 @@ $@"🕵️ Повідомлення
 
                     if (text == "/admin" && isAdmin)
                     {
-                        await Send(http, chatId,
-@"⚙️ Адмін панель
-
-/add команда текст
-/del команда
-/send текст
-/addadmin ID
-/deladmin ID
-/ahelp");
+                        await Send(http, chatId, "⚙️ Адмін панель\nНапиши /ahelp");
                         continue;
                     }
 
                     if (text == "/ahelp" && isAdmin)
                     {
                         await Send(http, chatId,
-@"👑 Адмін:
-/admin
-/add
-/del
-/send
-/addadmin
-/deladmin
-/id
-/online
-/spy on
-/spy off");
+@"👑 Адмін команди:
+
+/admin — панель
+/ahelp — допомога
+/id — твій ID
+
+/add команда текст — створити команду
+/del команда — видалити команду
+
+/send текст — розсилка
+
+/addadmin ID — додати адміна
+/deladmin ID — видалити адміна
+/admins — список адмінів
+
+/online — хто онлайн
+
+/spy on — сліжка вкл
+/spy off — сліжка викл");
                         continue;
                     }
 
                     if (text.StartsWith("/addadmin") && isAdmin)
                     {
-                        var id = long.Parse(text.Split(' ')[1]);
+                        var parts = text.Split(' ');
+
+                        if (parts.Length < 2)
+                        {
+                            await Send(http, chatId, "⚠️ /addadmin ID");
+                            continue;
+                        }
+
+                        var id = long.Parse(parts[1]);
                         Admins.Add(id);
                         SaveAdmins();
+
                         await Send(http, chatId, "✅ Додано");
+
+                        await Send(http, id,
+@"👑 Вам видали адмінку!
+/admin
+/ahelp");
+
                         continue;
                     }
 
@@ -263,15 +303,30 @@ $@"🕵️ Повідомлення
 
                     if (text.StartsWith("/send") && isAdmin)
                     {
+                        if (text.Length <= 6)
+                        {
+                            await Send(http, chatId, "⚠️ /send текст");
+                            continue;
+                        }
+
                         var message = text.Substring(5);
+
                         foreach (var u in Users)
                             await Send(http, u, $"📢 {message}");
+
                         continue;
                     }
 
                     if (text.StartsWith("/add") && isAdmin)
                     {
                         var parts = text.Split(' ', 3);
+
+                        if (parts.Length < 3)
+                        {
+                            await Send(http, chatId, "⚠️ /add команда текст");
+                            continue;
+                        }
+
                         Commands[parts[1]] = parts[2];
                         SaveCommands();
                         await Send(http, chatId, "✅ Додано");
@@ -280,7 +335,21 @@ $@"🕵️ Повідомлення
 
                     if (text.StartsWith("/del") && isAdmin)
                     {
-                        Commands.Remove(text.Split(' ')[1]);
+                        var parts = text.Split(' ');
+
+                        if (parts.Length < 2)
+                        {
+                            await Send(http, chatId, "⚠️ /del команда");
+                            continue;
+                        }
+
+                        if (ProtectedCommands.Contains(parts[1]))
+                        {
+                            await Send(http, chatId, "🚫 Не можна видалити системну");
+                            continue;
+                        }
+
+                        Commands.Remove(parts[1]);
                         SaveCommands();
                         await Send(http, chatId, "❌ Видалено");
                         continue;
@@ -334,7 +403,6 @@ $@"🕵️ Повідомлення
 
             changes.Add("⚠️ ЗМІНИ В РОЗКЛАДІ\n");
             changes.Add(newData[i]);
-
             break;
         }
 
