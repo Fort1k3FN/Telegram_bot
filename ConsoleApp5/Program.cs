@@ -79,7 +79,7 @@ class Program
         LoadCommands();
         LoadUsers();
 
-        string token = "ТУТ_ТВОЙ_ТОКЕН";
+        string token = "8360154496:AAFZ85zfNtpF8yzrMzFvXfwqC9mAnp-iV8E";
         string url = "https://asu-srv.pnu.edu.ua/cgi-bin/timetable.cgi?n=700&group=-4975";
 
         using var http = new HttpClient
