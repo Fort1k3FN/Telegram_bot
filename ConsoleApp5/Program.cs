@@ -12,7 +12,6 @@ using System.IO;
 
 class Program
 {
-    // ✅ ТУТ ВЖЕ 2 АДМІНА
     static HashSet<long> Admins = new() { 828027108, 1034256806 };
 
     static Dictionary<string, string> Commands = new();
@@ -21,6 +20,10 @@ class Program
     static Dictionary<long, DateTime> LastSeen = new();
     static HashSet<long> SpyAdmins = new();
     static Dictionary<long, string> Usernames = new();
+
+    // 🔥 НОВЕ
+    static Dictionary<long, (long by, DateTime date, string reason)> BannedUsers = new();
+    static readonly HashSet<long> SuperAdmins = new() { 828027108, 1034256806 };
 
     static string adminsFile = "admins.txt";
     static string commandsFile = "commands.json";
@@ -76,7 +79,7 @@ class Program
         LoadCommands();
         LoadUsers();
 
-        string token = "8360154496:AAFZ85zfNtpF8yzrMzFvXfwqC9mAnp-iV8E";
+        string token = "ТУТ_ТВОЙ_ТОКЕН";
         string url = "https://asu-srv.pnu.edu.ua/cgi-bin/timetable.cgi?n=700&group=-4975";
 
         using var http = new HttpClient
@@ -142,12 +145,16 @@ class Program
                     var text = textEl.GetString() ?? "";
                     var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
 
-                    var username = msg.GetProperty("from").TryGetProperty("username", out var userProp)
-                        ? "@" + userProp.GetString()
+                    var username = msg.GetProperty("from").TryGetProperty("username", out var u)
+                        ? "@" + u.GetString()
                         : "без username";
 
                     Usernames[chatId] = username;
                     LastSeen[chatId] = DateTime.Now;
+
+                    // 🚫 БАН
+                    if (BannedUsers.ContainsKey(chatId))
+                        continue;
 
                     if (!Users.Contains(chatId))
                     {
@@ -202,7 +209,7 @@ $@"🕵️ Повідомлення
                         continue;
                     }
 
-                    // 👑 СПИСОК АДМІНІВ
+                    // 👑 АДМІНИ
                     if (text == "/admins" && isAdmin)
                     {
                         var sb = new StringBuilder("👑 Адміни:\n\n");
@@ -231,157 +238,73 @@ $@"🕵️ Повідомлення
                         continue;
                     }
 
-                    if (text == "/id")
-                    {
-                        await Send(http, chatId, $"🆔 Твій ID: {chatId}");
-                        continue;
-                    }
-
-                    if (text == "/admin" && isAdmin)
-                    {
-                        await Send(http, chatId, "⚙️ Адмін панель\nНапиши /ahelp");
-                        continue;
-                    }
-
                     if (text == "/ahelp" && isAdmin)
                     {
                         await Send(http, chatId,
 @"👑 Адмін команди:
 
-/admin — панель
-/ahelp — допомога
-/id — твій ID
+/admin
+/ahelp
+/id
 
-/add команда текст — створити команду
-/del команда — видалити команду
+/add
+/del
+/send
 
-/send текст — розсилка
+/addadmin
+/deladmin
+/admins
 
-/addadmin ID — додати адміна
-/deladmin ID — видалити адміна
-/admins — список адмінів
+/online
 
-/online — хто онлайн
+/spy on
+/spy off
 
-/spy on — сліжка вкл
-/spy off — сліжка викл");
+/ban
+/bans");
                         continue;
                     }
 
-                    if (text.StartsWith("/addadmin") && isAdmin)
+                    // 🚫 BAN
+                    if (text.StartsWith("/ban") && isAdmin)
                     {
-                        var parts = text.Split(' ');
-
+                        var parts = text.Split(' ', 3);
                         if (parts.Length < 2)
                         {
-                            await Send(http, chatId, "⚠️ /addadmin ID");
+                            await Send(http, chatId, "⚠️ /ban ID причина");
                             continue;
                         }
 
                         var id = long.Parse(parts[1]);
-                        Admins.Add(id);
-                        SaveAdmins();
+                        var reason = parts.Length >= 3 ? parts[2] : "без причини";
 
-                        await Send(http, chatId, "✅ Додано");
+                        BannedUsers[id] = (chatId, DateTime.Now, reason);
 
-                        await Send(http, id,
-@"👑 Вам видали адмінку!
-/admin
-/ahelp");
-
+                        await Send(http, id, "🚫 Вас заблоковано");
+                        await Send(http, chatId, "✅ Заблоковано");
                         continue;
                     }
 
-                    if (text.StartsWith("/deladmin") && isAdmin)
+                    if (text == "/bans" && isAdmin)
                     {
-                        var id = long.Parse(text.Split(' ')[1]);
-                        Admins.Remove(id);
-                        SaveAdmins();
-                        await Send(http, chatId, "❌ Видалено");
-                        continue;
-                    }
+                        var sb = new StringBuilder("🚫 Бани:\n\n");
 
-                    if (text.StartsWith("/send") && isAdmin)
-                    {
-                        if (text.Length <= 6)
+                        foreach (var b in BannedUsers)
                         {
-                            await Send(http, chatId, "⚠️ /send текст");
-                            continue;
+                            sb.AppendLine($"👤 {b.Key}");
+                            sb.AppendLine($"Адмін: {b.Value.by}");
+                            sb.AppendLine($"Дата: {b.Value.date}");
+                            sb.AppendLine($"Причина: {b.Value.reason}\n");
                         }
 
-                        var message = text.Substring(5);
-
-                        foreach (var u in Users)
-                            await Send(http, u, $"📢 {message}");
-
+                        await Send(http, chatId, sb.ToString());
                         continue;
                     }
 
-                    if (text.StartsWith("/add") && isAdmin)
+                    if (text == "/id")
                     {
-                        var parts = text.Split(' ', 3);
-
-                        if (parts.Length < 3)
-                        {
-                            await Send(http, chatId, "⚠️ /add команда текст");
-                            continue;
-                        }
-
-                        Commands[parts[1]] = parts[2];
-                        SaveCommands();
-                        await Send(http, chatId, "✅ Додано");
+                        await Send(http, chatId, $"🆔 Твій ID: {chatId}");
                         continue;
-                    }
-
-                    if (text.StartsWith("/del") && isAdmin)
-                    {
-                        var parts = text.Split(' ');
-
-                        if (parts.Length < 2)
-                        {
-                            await Send(http, chatId, "⚠️ /del команда");
-                            continue;
-                        }
-
-                        if (ProtectedCommands.Contains(parts[1]))
-                        {
-                            await Send(http, chatId, "🚫 Не можна видалити системну");
-                            continue;
-                        }
-
-                        Commands.Remove(parts[1]);
-                        SaveCommands();
-                        await Send(http, chatId, "❌ Видалено");
-                        continue;
-                    }
-
-                    if (Commands.ContainsKey(text))
-                    {
-                        await Send(http, chatId, Commands[text]);
-                        continue;
-                    }
-
-                    if (text == "/розклад" || text == "📅 Розклад")
-                    {
-                        await ShowSchedule(http, chatId, url);
-                        continue;
-                    }
-
-                    if (text == "/start")
-                    {
-                        await http.PostAsJsonAsync("sendMessage", new
-                        {
-                            chat_id = chatId,
-                            text = "👋 Привіт!",
-                            reply_markup = new
-                            {
-                                keyboard = new[]
-                                {
-                                    new[] { new { text = "📅 Розклад" } }
-                                },
-                                resize_keyboard = true
-                            }
-                        });
                     }
                 }
             }
